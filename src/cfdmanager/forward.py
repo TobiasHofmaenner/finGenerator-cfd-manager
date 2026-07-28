@@ -17,9 +17,14 @@ def build_sample(job: dict) -> dict:
     """Assemble a findata sample from a completed job (request) + result."""
     req = job.get("request") or {}
     res = job.get("result") or {}
+    # A SET job's geometry is the whole placed cluster (blades + placement), not
+    # a single blade — findata hashes fin_geometry, so storing only one member
+    # would collide distinct clusters onto one sample. `config` falls back to the
+    # set's own config when the client did not label the job.
+    fin_set = req.get("fin_set")
     sample = {
-        "fin_geometry": req.get("fin"),
-        "config": req.get("config"),
+        "fin_geometry": fin_set or req.get("fin"),
+        "config": req.get("config") or (fin_set or {}).get("config"),
         "operating_point": {
             "speed": res.get("speed") or req.get("speed"),
             "angles": req.get("angles"),

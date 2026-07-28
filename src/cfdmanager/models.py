@@ -5,13 +5,17 @@ from __future__ import annotations
 
 from typing import Any, Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 
 DEFAULT_ANGLES = [0.0, 4.0, 8.0, 12.0, 16.0]
 
 
 class JobRequest(BaseModel):
-    fin: dict[str, Any]                 # fingen fin dict (validated by the worker)
+    # Exactly one of `fin` (single blade) or `fin_set` (a whole placed cluster —
+    # the interference-resolving multi-fin case). Both are fingen dicts, checked
+    # by the worker; the manager stays free of a fingen dependency.
+    fin: dict[str, Any] | None = None
+    fin_set: dict[str, Any] | None = None
     config: str | None = None           # single/thruster/... (corpus context)
     speed: float | None = None
     mesh_level: int = 2
@@ -20,6 +24,12 @@ class JobRequest(BaseModel):
     # default). A small value gives a fast coarse run for smoke tests.
     end_time: int | None = None
     smoke: bool = False
+
+    @model_validator(mode="after")
+    def _exactly_one_geometry(self) -> JobRequest:
+        if bool(self.fin) == bool(self.fin_set):
+            raise ValueError("provide exactly one of 'fin' or 'fin_set'")
+        return self
 
 
 class LeaseRequest(BaseModel):

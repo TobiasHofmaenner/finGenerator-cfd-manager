@@ -80,3 +80,50 @@ async def test_result_requires_owner_and_returns_job(store):
                                     {"rows": [{"cl": 0.1}]}, None)
     assert job is not None and job["status"] == "done"
     assert job["request"]["fin"] == {"x": 1}   # full row returned for forwarding
+
+
+def test_job_request_requires_exactly_one_geometry():
+    """A job is either a single blade or a whole set — never both, never
+    neither. Silently accepting both would let the worker pick and the corpus
+    record a geometry the client did not intend."""
+    import pydantic
+
+    from cfdmanager.models import JobRequest
+
+    fin = {"outline": {}, "foil": {}, "grooves": {}}
+    fin_set = {"config": "thruster", "side": fin, "center": fin}
+
+    assert JobRequest(fin=fin).fin_set is None
+    assert JobRequest(fin_set=fin_set).fin is None
+
+    with pytest.raises(pydantic.ValidationError):
+        JobRequest()
+    with pytest.raises(pydantic.ValidationError):
+        JobRequest(fin=fin, fin_set=fin_set)
+
+
+def test_build_sample_stores_the_whole_cluster_for_a_set_job():
+    """findata hashes fin_geometry: a SET sample must carry the full placed
+    cluster (blades + placement), or two different clusters collapse onto one
+    sample. config falls back to the set's own config."""
+    fin = {"outline": {}, "foil": {}, "grooves": {}}
+    fin_set = {"config": "thruster", "side": fin, "center": fin,
+               "toe": 3.5, "cant": 8.0}
+    job = {
+        "id": "job-1",
+        "request": {"fin_set": fin_set, "speed": 7.0, "angles": [0.0, 4.0]},
+        "result": {"kind": "set", "speed": 7.0,
+                   "rows": [{"alpha": 0.0, "per_slot": {}}],
+                   "cfd_setup": {"kind": "set", "placement": {"toe": 3.5}}},
+    }
+    sample = forward.build_sample(job)
+    assert sample["fin_geometry"] == fin_set          # the CLUSTER, not a blade
+    assert sample["config"] == "thruster"             # inferred from the set
+    assert sample["cfd_setup"]["kind"] == "set"
+    assert sample["provenance"]["job_id"] == "job-1"
+
+    # A single-fin job is unchanged.
+    single = forward.build_sample(
+        {"id": "job-2", "request": {"fin": fin, "config": "single"},
+         "result": {"rows": []}})
+    assert single["fin_geometry"] == fin
