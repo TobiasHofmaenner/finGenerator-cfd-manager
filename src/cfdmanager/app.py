@@ -10,8 +10,7 @@ from __future__ import annotations
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import (BackgroundTasks, Depends, FastAPI, Header, HTTPException,
-                     Request, Response)
+from fastapi import BackgroundTasks, Depends, FastAPI, Header, HTTPException, Request, Response
 
 from . import forward
 from .db import Store

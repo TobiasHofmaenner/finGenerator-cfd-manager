@@ -64,7 +64,7 @@ class Store:
         self.pool = pool
 
     @classmethod
-    async def connect(cls, dsn: str) -> "Store":
+    async def connect(cls, dsn: str) -> Store:
         pool = await asyncpg.create_pool(dsn, min_size=1, max_size=8)
         async with pool.acquire() as con:
             await con.execute(DDL)
