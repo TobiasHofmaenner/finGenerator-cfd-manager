@@ -16,6 +16,9 @@ class JobRequest(BaseModel):
     speed: float | None = None
     mesh_level: int = 2
     angles: list[float] = Field(default_factory=lambda: list(DEFAULT_ANGLES))
+    # Solver iteration cap, passed through to the worker (None => its recipe
+    # default). A small value gives a fast coarse run for smoke tests.
+    end_time: int | None = None
     smoke: bool = False
 
 
