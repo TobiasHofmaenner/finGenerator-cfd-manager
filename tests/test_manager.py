@@ -127,3 +127,28 @@ def test_build_sample_stores_the_whole_cluster_for_a_set_job():
         {"id": "job-2", "request": {"fin": fin, "config": "single"},
          "result": {"rows": []}})
     assert single["fin_geometry"] == fin
+
+
+def test_jobrequest_accepts_optimize_as_the_third_kind():
+    """`optimize` (the web quiz's rider multistart) is a first-class job kind:
+    exactly one of fin / fin_set / optimize, same as the geometry pair."""
+    import pydantic
+
+    from cfdmanager.models import HeartbeatRequest, JobRequest
+
+    rider = {"weight_kg": 62, "skill": "ADVANCED", "config": "thruster",
+             "material": "pet-cf", "tabs": "click_tab",
+             "spider_targets": {"speed": 0.85}}
+    req = JobRequest(optimize={"rider": rider})
+    assert req.optimize["rider"]["weight_kg"] == 62
+    with pytest.raises(pydantic.ValidationError):
+        JobRequest()                                           # none of the three
+    with pytest.raises(pydantic.ValidationError):
+        JobRequest(fin={"outline": {}}, optimize={"rider": rider})   # two kinds
+
+    # The heartbeat may carry live progress for the job row; absent stays None
+    # so a plain beat never overwrites stored progress (COALESCE in the store).
+    hb = HeartbeatRequest(worker_id="w1", progress={"phase": "seed 1/4",
+                                                    "fraction": 0.12})
+    assert hb.progress["fraction"] == 0.12
+    assert HeartbeatRequest(worker_id="w1").progress is None

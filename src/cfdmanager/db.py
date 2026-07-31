@@ -24,6 +24,8 @@ CREATE TABLE IF NOT EXISTS jobs (
     finished_at timestamptz
 );
 CREATE INDEX IF NOT EXISTS jobs_status_created ON jobs (status, created_at);
+-- Live progress (additive; predates some deployments, hence the ALTER).
+ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress jsonb;
 """
 
 _LEASE_SQL = """
@@ -52,6 +54,7 @@ def _row(r: asyncpg.Record) -> dict:
     d["id"] = str(d["id"])
     d["request"] = _j(d.get("request"))
     d["result"] = _j(d.get("result"))
+    d["progress"] = _j(d.get("progress"))
     for k in ("created_at", "leased_at", "lease_expires_at", "heartbeat_at",
               "finished_at"):
         if d.get(k) is not None:
@@ -104,13 +107,16 @@ class Store:
             r = await con.fetchrow(_LEASE_SQL, worker_id, str(lease_seconds))
             return {"id": str(r["id"]), "request": _j(r["request"])} if r else None
 
-    async def heartbeat(self, job_id: str, worker_id: str, lease_seconds: int) -> bool:
+    async def heartbeat(self, job_id: str, worker_id: str, lease_seconds: int,
+                        progress: dict | None = None) -> bool:
         async with self.pool.acquire() as con:
             res = await con.execute(
                 "UPDATE jobs SET heartbeat_at=now(), "
-                "lease_expires_at=now() + ($3 || ' seconds')::interval "
+                "lease_expires_at=now() + ($3 || ' seconds')::interval, "
+                "progress=COALESCE($4::jsonb, progress) "
                 "WHERE id=$1::uuid AND worker_id=$2 AND status='running'",
-                job_id, worker_id, str(lease_seconds))
+                job_id, worker_id, str(lease_seconds),
+                json.dumps(progress) if progress is not None else None)
             return res.endswith(" 1")
 
     async def submit_result(self, job_id, worker_id, status, result, error) -> dict | None:

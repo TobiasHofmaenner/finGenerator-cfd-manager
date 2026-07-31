@@ -95,7 +95,8 @@ async def lease(body: LeaseRequest, request: Request, response: Response):
 
 @app.post("/jobs/{job_id}/heartbeat", dependencies=[Depends(worker_auth)])
 async def heartbeat(job_id: str, body: HeartbeatRequest, request: Request):
-    if not await _store(request).heartbeat(job_id, body.worker_id, DEFAULT_LEASE):
+    if not await _store(request).heartbeat(job_id, body.worker_id, DEFAULT_LEASE,
+                                           body.progress):
         raise HTTPException(status_code=409, detail="lease lost")
     return {"ok": True}
 
@@ -107,7 +108,8 @@ async def submit_result(job_id: str, body: ResultRequest, request: Request,
         job_id, body.worker_id, body.status, body.result, body.error)
     if job is None:
         raise HTTPException(status_code=409, detail="lease lost or not running")
-    # Feed the corpus on success (best-effort, after the response).
-    if body.status == "done":
+    # Feed the corpus on success (best-effort, after the response). Optimize
+    # jobs are RIDER results, not CFD samples — nothing for the corpus.
+    if body.status == "done" and not (job.get("request") or {}).get("optimize"):
         background.add_task(forward.forward_sample, job)
     return {"ok": True}
