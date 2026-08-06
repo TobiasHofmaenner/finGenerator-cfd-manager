@@ -28,6 +28,23 @@ CREATE INDEX IF NOT EXISTS jobs_status_created ON jobs (status, created_at);
 ALTER TABLE jobs ADD COLUMN IF NOT EXISTS progress jsonb;
 """
 
+# A job may be re-leased after a lapse only this many times before it is
+# QUARANTINED as failed. Without a cap, a job whose run (or whose result
+# delivery) reliably kills the worker requeues forever: four such jobs burned
+# six days of 12-core compute at up to 221 attempts each. Attempt 1 is the
+# normal first lease, so MAX_ATTEMPTS=4 means three retries after a lapse —
+# enough for worker restarts and deploys, nowhere near enough to hide a
+# poison job.
+MAX_ATTEMPTS = 4
+
+_QUARANTINE_SQL = """
+UPDATE jobs SET
+    status='error', finished_at=now(),
+    error='quarantined: ' || attempts || ' attempts without a result '
+          '(lease expired each time) — likely kills the worker; not retrying'
+WHERE status='running' AND lease_expires_at < now() AND attempts >= $1
+"""
+
 _LEASE_SQL = """
 UPDATE jobs SET
     status='running', worker_id=$1, leased_at=now(),
@@ -35,7 +52,8 @@ UPDATE jobs SET
     heartbeat_at=now(), attempts=attempts+1
 WHERE id = (
     SELECT id FROM jobs
-    WHERE status='queued' OR (status='running' AND lease_expires_at < now())
+    WHERE status='queued'
+       OR (status='running' AND lease_expires_at < now() AND attempts < $3)
     ORDER BY created_at
     FOR UPDATE SKIP LOCKED
     LIMIT 1)
@@ -104,7 +122,12 @@ class Store:
 
     async def lease_job(self, worker_id: str, lease_seconds: int) -> dict | None:
         async with self.pool.acquire() as con:
-            r = await con.fetchrow(_LEASE_SQL, worker_id, str(lease_seconds))
+            # Sweep exhausted jobs to a terminal state FIRST, so they are
+            # visibly failed rather than invisible zombies the lease query
+            # forever skips.
+            await con.execute(_QUARANTINE_SQL, MAX_ATTEMPTS)
+            r = await con.fetchrow(_LEASE_SQL, worker_id, str(lease_seconds),
+                                   MAX_ATTEMPTS)
             return {"id": str(r["id"]), "request": _j(r["request"])} if r else None
 
     async def heartbeat(self, job_id: str, worker_id: str, lease_seconds: int,
