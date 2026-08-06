@@ -1,6 +1,6 @@
 [project]
 name = "cfdmanager"
-version = "0.3.0"
+version = "0.3.2"
 description = "T-FINS CFD job manager: a slim FastAPI dispatcher (queue in CNPG) that hands CFD jobs to off-cluster workers and forwards results to findata."
 readme = "README.md"
 requires-python = ">=3.11"
